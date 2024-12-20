@@ -75,54 +75,49 @@ The app is built using a clean architecture pattern with three layers:
 ### **Joke Caching**
 Code to save and retrieve jokes:
 ```dart
-import 'package:shared_preferences/shared_preferences.dart';
-
-class JokeCache {
-  static const String _cacheKey = 'cached_jokes';
-
-  Future<void> saveJokes(List<String> jokes) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_cacheKey, jokes);
+Future<void> cacheJokes(List<Joke> jokes) async {
+    final jokesJson = jokes.map((joke) => joke.toJson()).toList();
+    await _prefs.setString(_cacheKey, jsonEncode(jokesJson));
   }
 
-  Future<List<String>> getCachedJokes() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getStringList(_cacheKey) ?? [];
+  Future<List<Joke>> getCachedJokes() async {
+    final jsonString = _prefs.getString(_cacheKey);
+    if (jsonString == null) return [];
+
+    try {
+      final List<dynamic> jsonList = jsonDecode(jsonString);
+      return jsonList.map((json) => Joke.fromJson(json)).toList();
+    } catch (e) {
+      return [];
+    }
   }
-}
 ```
 
 ### **API Integration**
 Code to fetch jokes from the API:
 ```dart
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+ final response = await _dio.get(
+        "https://v2.jokeapi.dev/joke/Programming,Christmas?blacklistFlags=nsfw,religious,racist&amount=5",
+        options: Options(
+          sendTimeout: const Duration(seconds: 5),
+          receiveTimeout: const Duration(seconds: 5),
+        ),
+      );
 
-class JokeService {
-  final String _apiUrl = 'https://v2.jokeapi.dev/joke/Any?amount=5';
-
-  Future<List<String>> fetchJokes() async {
-    final response = await http.get(Uri.parse(_apiUrl));
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      return List<String>.from(data['jokes'].map((j) => j['setup'] + ' - ' + j['delivery']));
-    } else {
-      throw Exception('Failed to load jokes');
-    }
-  }
-}
-```
-
-### **Offline Support**
-Code to check connectivity status:
-```dart
-import 'package:connectivity_plus/connectivity_plus.dart';
-
-Future<bool> isOnline() async {
-  final result = await Connectivity().checkConnectivity();
-  return result == ConnectivityResult.mobile || result == ConnectivityResult.wifi;
-}
+      if (response.statusCode == 200) {
+        final List<dynamic> jokesJson = response.data['jokes'];
+        final jokes = jokesJson.map((json) => Joke.fromJson(json)).toList();
+        await cacheJokes(jokes);
+        await _prefs.setInt(
+            _lastFetchKey, DateTime.now().millisecondsSinceEpoch);
+        return jokes;
+      } else {
+        throw DioException(
+          requestOptions: response.requestOptions,
+          response: response,
+          type: DioExceptionType.badResponse,
+        );
+      }
 ```
 
 ---
